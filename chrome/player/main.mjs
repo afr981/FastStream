@@ -80,7 +80,24 @@ async function recieveSources(request, sendResponse) {
   const sources = request.sources;
 
   if (sources.length === 0) {
-    sendResponse('no_sources');
+    if (subs && subs.length > 0) {
+      subs = await loadSubtitles(subs);
+      subs = await sortSubtitles(subs);
+      subs.forEach((sub) => {
+        const track = new SubtitleTrack(sub.label, sub.language);
+        try {
+          track.loadText(sub.data);
+          if (track.cues.length > 0) {
+            window.fastStream.loadSubtitleTrack(track, false);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      });
+      sendResponse('sources_recieved');
+    } else {
+      sendResponse('no_sources');
+    }
     return;
   }
 
