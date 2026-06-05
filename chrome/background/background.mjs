@@ -996,16 +996,44 @@ function handleSubtitles(url, frame, headers) {
   const subtitles = frame.getSubtitles();
   if (subtitles.find((a) => {
     return a.source === url;
-  })) return;
+  })) return null;
 
   if (Logging) console.log('Found subtitle', url);
   const u = (new URL(url)).pathname.split('/').pop();
 
-  subtitles.push({
+  const subtitle = {
     source: url,
     headers: headers,
     label: u.split('.')[0],
     time: Date.now(),
+  };
+  subtitles.push(subtitle);
+  return subtitle;
+}
+
+function pushSubtitleToPlayer(frame, subtitle) {
+  let playerFrame = null;
+  if (frame.isPlayer) {
+    playerFrame = frame;
+  } else {
+    for (const child of frame.children) {
+      if (child.isPlayer) {
+        playerFrame = child;
+        break;
+      }
+    }
+  }
+  if (!playerFrame) return;
+
+  chrome.tabs.sendMessage(frame.tab.tabId, {
+    type: MessageTypes.SOURCES,
+    subtitles: [subtitle],
+    sources: [],
+    autoSetSource: false,
+  }, {
+    frameId: playerFrame.frameId,
+  }, () => {
+    BackgroundUtils.checkMessageError('subtitle');
   });
 }
 
@@ -1308,7 +1336,6 @@ chrome.webRequest.onHeadersReceived.addListener(
       let ext = URLUtils.get_url_extension(url);
       const tab = Tabs.getTabOrCreate(details.tabId);
       const frame = tab.getFrameOrCreate(details.frameId);
-      if (frame.hasPlayer()) return;
 
       if ((details.statusCode >= 400 && details.statusCode < 600) || details.statusCode === 204) {
         return; // Client or server error. Ignore it
@@ -1327,8 +1354,14 @@ chrome.webRequest.onHeadersReceived.addListener(
       }
 
       if (BackgroundUtils.isSubtitles(ext)) {
-        return handleSubtitles(url, frame, frame.requestHeaders.get(details.requestId));
+        const subtitle = handleSubtitles(url, frame, frame.requestHeaders.get(details.requestId));
+        if (subtitle && frame.hasPlayer()) {
+          pushSubtitleToPlayer(frame, subtitle);
+        }
+        return;
       }
+
+      if (frame.hasPlayer()) return;
 
       let mode = URLUtils.getModeFromExtension(ext);
       if (!mode) {
